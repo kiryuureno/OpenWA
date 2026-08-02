@@ -1,4 +1,5 @@
 import { computeFeatureFlags } from './feature-flags';
+import { computeStealthConfig } from '../modules/stealth/stealth-config';
 import { resolveInflightBodyBudgetBytes } from './inflight-body-budget';
 import { readWsRateLimitConfig } from '../modules/events/ws-rate-limit';
 
@@ -81,6 +82,10 @@ export default () => ({
   // Runtime feature flags. Single source of truth: src/config/feature-flags.ts. Exposed here so the
   // full set is discoverable via ConfigService (`features.*`) instead of scattered process.env reads.
   features: computeFeatureFlags(),
+
+  // Stealth (anti-ban) humanization config, snapshot at boot like the feature flags so the send
+  // path reads `stealth.*` via ConfigService instead of scattered process.env reads.
+  stealth: computeStealthConfig(),
 
   // Redis configuration
   redis: {

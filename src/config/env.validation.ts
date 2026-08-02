@@ -171,8 +171,34 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'STATS_CACHE_TTL_MS', // 0 = memo disabled
     'WEBHOOK_MAX_PER_SESSION', // 0 = unlimited
     'WEBHOOK_MEDIA_INLINE_MAX_BYTES', // 0 = never inline media
+    // Stealth (anti-ban) knobs: garbage must not silently disable a delay/cap.
+    'STEALTH_TYPING_MIN_MS',
+    'STEALTH_TYPING_MAX_MS',
+    'STEALTH_DELAY_MIN_MS',
+    'STEALTH_DELAY_MAX_MS',
+    'STEALTH_DISTRACTION_MIN_MS',
+    'STEALTH_DISTRACTION_MAX_MS',
+    'STEALTH_NEW_CHAT_DELAY_MIN_MS',
+    'STEALTH_NEW_CHAT_DELAY_MAX_MS',
+    'STEALTH_DAILY_CAP', // 0 = unlimited
+    'STEALTH_NEW_CHAT_DAILY_CAP', // 0 = unlimited
+    'STEALTH_WARMUP_DAYS', // 0 = warm-up disabled
+    'STEALTH_WARMUP_START_NEW_CHATS',
+    'STEALTH_PRESENCE_MIN_INTERVAL_MS',
+    'STEALTH_PRESENCE_MAX_INTERVAL_MS',
+    'STEALTH_RECONNECT_GRACE_MIN_MS',
+    'STEALTH_RECONNECT_GRACE_MAX_MS',
+    'STEALTH_CIRCUIT_THRESHOLD',
+    'STEALTH_CIRCUIT_COOLDOWN_MS',
+    'STEALTH_QUEUE_MAX_SIZE',
   ]) {
     checkNonNegativeInt(key);
+  }
+
+  // Stealth quiet-hours window: "HH:MM-HH:MM" (24h, overnight allowed) or empty (disabled).
+  const quietHours = str('STEALTH_QUIET_HOURS');
+  if (quietHours !== undefined && quietHours !== '' && !/^\d{1,2}:\d{2}-\d{1,2}:\d{2}$/.test(quietHours)) {
+    errors.push(`STEALTH_QUIET_HOURS must look like "22:00-08:00" (got ${JSON.stringify(quietHours)})`);
   }
 
   // Some knobs are nonsensical at 0 and contradict the "non-negative" intent: a rate-limit LIMIT of 0
@@ -236,6 +262,10 @@ export function validateEnv(config: EnvConfig): EnvConfig {
     'STORE_EPHEMERAL_MESSAGES',
     'RESOLVE_LID_TO_PHONE',
     'SIMULATE_TYPING',
+    'STEALTH_MODE',
+    'STEALTH_TYPING',
+    'STEALTH_MARK_SEEN',
+    'STEALTH_PRESENCE',
     'SEARCH_ENABLED',
     // Read at boot by the throttler factory (app.module.ts) and CacheService with `=== 'true'`: a
     // typo like `ture` silently downgrades rate-limit storage + cache to per-process in-memory.

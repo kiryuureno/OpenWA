@@ -579,14 +579,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       const puppeteerArgs = this.config.puppeteer?.args
         ? [...this.config.puppeteer.args]
         : [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-          ];
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--no-first-run',
+          '--no-zygote',
+          '--disable-gpu',
+        ];
 
       // Add proxy configuration if provided — but only when the URL parses to a supported scheme, so
       // a malformed/stored proxy value can't break the Chromium launch or smuggle a non-proxy scheme.
@@ -601,7 +601,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           if (proxyLaunch.socksAuthUnsupported) {
             this.logger.warn(
               `Proxy for session ${this.config.sessionId} has credentials on a SOCKS proxy, but Chromium ` +
-                `cannot authenticate SOCKS proxies. Use an IP-authorized proxy or an HTTP/HTTPS proxy instead.`,
+              `cannot authenticate SOCKS proxies. Use an IP-authorized proxy or an HTTP/HTTPS proxy instead.`,
             );
           }
           this.logger.log(`Using proxy: ${proxyLaunch.serverArg}`);
@@ -693,12 +693,12 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         // this can't throw and mask the original error we are about to rethrow.
         this.logger.warn(
           `"${reason}" during initialize. If this followed an OpenWA upgrade that changed the ` +
-            `Chromium/Chrome binary (v0.8.12 amd64 switched Debian Chromium → Chrome for Testing), the ` +
-            `session's browser profile is likely stale — delete the profile dir ` +
-            `"${path.join(path.resolve(this.config.sessionDataPath), `session-${this.config.sessionId}`)}" ` +
-            `and start again to re-scan. If no upgrade happened, Puppeteer also raises this on a page ` +
-            `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
-            `See docs/12-troubleshooting-faq.md.`,
+          `Chromium/Chrome binary (v0.8.12 amd64 switched Debian Chromium → Chrome for Testing), the ` +
+          `session's browser profile is likely stale — delete the profile dir ` +
+          `"${path.join(path.resolve(this.config.sessionDataPath), `session-${this.config.sessionId}`)}" ` +
+          `and start again to re-scan. If no upgrade happened, Puppeteer also raises this on a page ` +
+          `navigation or renderer crash (check for memory pressure or a WhatsApp Web reload). ` +
+          `See docs/12-troubleshooting-faq.md.`,
         );
       }
       this.callbacks.onError?.(reason);
@@ -1020,8 +1020,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (reason === 'LOGOUT') {
         this.logger.warn(
           'WhatsApp unlinked this device (LOGOUT). whatsapp-web.js is deleting the stored credentials ' +
-            'for this session, so reconnecting cannot restore the link — the session comes back with a ' +
-            'fresh QR and must be re-scanned. If this was not expected, check Linked devices on the phone.',
+          'for this session, so reconnecting cannot restore the link — the session comes back with a ' +
+          'fresh QR and must be re-scanned. If this was not expected, check Linked devices on the phone.',
         );
       }
       this.setStatus(EngineStatus.DISCONNECTED);
@@ -1254,9 +1254,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (Date.now() - this.readyReconcileStartedAt >= READY_RECONCILE_TIMEOUT_MS) {
         this.logger.warn(
           'Timed out waiting for WhatsApp Web runtime readiness after authentication — the saved session ' +
-            'is stuck after the QR scan (usually the auto-selected WhatsApp Web build is incompatible). ' +
-            'Clearing it to re-pair; pin a known-good version via WWEBJS_WEB_VERSION (see ' +
-            'docs/12-troubleshooting-faq.md) if it keeps recurring.',
+          'is stuck after the QR scan (usually the auto-selected WhatsApp Web build is incompatible). ' +
+          'Clearing it to re-pair; pin a known-good version via WWEBJS_WEB_VERSION (see ' +
+          'docs/12-troubleshooting-faq.md) if it keeps recurring.',
           // Name the session: on a multi-session host this warning is the only way to tell whether one
           // session timed out or every one of them did, and the two have very different causes.
           { sessionId: this.config.sessionId, action: 'ready_reconcile_timeout' },
@@ -1394,9 +1394,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (this.onboardingDismissClicks >= ONBOARDING_MODAL_MAX_DISMISS_CLICKS) {
         this.reportActionRequired(
           `WhatsApp is still showing its onboarding modal after ${this.onboardingDismissClicks} ` +
-            "attempts to dismiss it. Open WhatsApp Web on the account holder's own browser and click " +
-            'through the "What\'s new" screen, or the companion device will be unlinked. Then restart ' +
-            'the session (stop, then start) — acknowledging the modal does not return it to ready on its own.',
+          "attempts to dismiss it. Open WhatsApp Web on the account holder's own browser and click " +
+          'through the "What\'s new" screen, or the companion device will be unlinked. Then restart ' +
+          'the session (stop, then start) — acknowledging the modal does not return it to ready on its own.',
         );
       }
     } catch {
@@ -1482,7 +1482,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         // reconnecting, indistinguishable from a WhatsApp-side logout or an untouched profile.
         this.logger.warn(
           `Deleted this session's stored WhatsApp credentials at ${dir}. That was the only copy, so the ` +
-            'next start cannot restore the link and comes back with a fresh QR to scan.',
+          'next start cannot restore the link and comes back with a fresh QR to scan.',
           { sessionId: this.config.sessionId, dir, action: 'auth_cleared' },
         );
       })
@@ -1734,7 +1734,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           // (#583 R3). Fire-and-forget: resolution (and the send) must never block/fail on the write.
           void this.config.lidMappingStore
             ?.remember(userPart(wid), userPart(chatId), this.config.sessionId)
-            ?.catch(() => {});
+            ?.catch(() => { });
         }
         return wid;
       }
@@ -3031,7 +3031,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.warnedStatusRecipients = true;
     this.logger.warn(
       "postStatus on the whatsapp-web.js engine broadcasts to the account's status-privacy audience; " +
-        'the recipients allow-list is not honored by whatsapp-web.js (it is on the Baileys engine).',
+      'the recipients allow-list is not honored by whatsapp-web.js (it is on the Baileys engine).',
     );
   }
 
@@ -3179,6 +3179,17 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // so log at WARN, not ERROR: a migrated contact routinely yields `No LID for user` on the
       // presence path and an ERROR line reads as a fault when nothing actually failed (#582).
       this.logger.warn(`Could not set chat state '${state}' for ${chatId} (best-effort)`, { error: String(error) });
+    }
+  }
+
+  async sendPresenceAvailable(): Promise<void> {
+    this.ensureReady();
+    try {
+      // The global "online" flip (no chat target), matching what the phone sends when WhatsApp
+      // comes to the foreground — used by the stealth humanizer between chat-scoped states.
+      await this.client!.sendPresenceAvailable();
+    } catch (error) {
+      this.logger.warn(`Could not mark presence available (best-effort)`, { error: String(error) });
     }
   }
 

@@ -45,6 +45,18 @@ export class SendTextMessageDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   mentions?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Humanized (stealth) pacing for this send: online presence, typing indicator and a ' +
+      'length-scaled delay before the actual send. Default true; set false for a low-latency ' +
+      'direct send (less ban-safe).',
+    default: true,
+  })
+  @ToStrictBoolean()
+  @IsOptional()
+  @IsBoolean()
+  humanize?: boolean;
 }
 
 export class SendMediaMessageDto {
@@ -108,6 +120,18 @@ export class SendMediaMessageDto {
   @IsString({ each: true })
   @MaxLength(64, { each: true })
   mentions?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Humanized (stealth) pacing for this send: online presence, typing indicator and a ' +
+      'length-scaled delay before the actual send. Default true; set false for a low-latency ' +
+      'direct send (less ban-safe).',
+    default: true,
+  })
+  @ToStrictBoolean()
+  @IsOptional()
+  @IsBoolean()
+  humanize?: boolean;
 }
 
 export class SendAudioMessageDto extends SendMediaMessageDto {

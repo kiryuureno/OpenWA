@@ -11,6 +11,7 @@ import configuration from './config/configuration';
 import { validateEnv } from './config/env.validation';
 import { SessionModule } from './modules/session/session.module';
 import { MessageModule } from './modules/message/message.module';
+import { StealthModule } from './modules/stealth/stealth.module';
 import { TemplateModule } from './modules/template/template.module';
 import { WebhookModule } from './modules/webhook/webhook.module';
 import { HealthModule } from './modules/health/health.module';
@@ -189,8 +190,8 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
 
             ssl: configService.get<boolean>('dataDatabase.ssl', false)
               ? {
-                  rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', true),
-                }
+                rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', true),
+              }
               : false,
 
             // Never auto-sync Postgres in production; rely on migrations.
@@ -277,6 +278,7 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     AuthModule,
     EngineModule,
     SessionModule,
+    StealthModule, // Stealth (anti-ban) humanized send pipeline — used by MessageModule
     MessageModule,
     TemplateModule,
     WebhookModule,
@@ -302,4 +304,4 @@ if (dashboardServingEnabled && dashboardBuildPresent) {
     ...serveStaticModules, // Bundled dashboard SPA (production single-port setup)
   ],
 })
-export class AppModule {}
+export class AppModule { }

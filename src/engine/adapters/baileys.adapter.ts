@@ -110,7 +110,7 @@ export function createProxyAgent(proxyUrl: string): Agent {
 
 /** Fully silent logger so Baileys does not spam stdout; diagnostics flow via connection.update. */
 function createSilentLogger(): BaileysLogger {
-  const noop = (): void => {};
+  const noop = (): void => { };
   const logger: BaileysLogger = {
     level: 'silent',
     child: () => logger,
@@ -140,16 +140,16 @@ function createBaileysLogger(): BaileysLogger {
   const threshold = BAILEYS_LOG_LEVELS.indexOf(configured);
   const write =
     (lvl: string) =>
-    (obj: unknown, msg?: string): void => {
-      if (BAILEYS_LOG_LEVELS.indexOf(lvl) < threshold) {
-        return;
-      }
-      const rec =
-        typeof obj === 'string' ? { msg: obj } : { ...(obj as Record<string, unknown>), ...(msg ? { msg } : {}) };
-      process.stdout.write(
-        JSON.stringify({ ts: new Date().toISOString(), level: lvl, context: 'baileys-wire', ...rec }) + '\n',
-      );
-    };
+      (obj: unknown, msg?: string): void => {
+        if (BAILEYS_LOG_LEVELS.indexOf(lvl) < threshold) {
+          return;
+        }
+        const rec =
+          typeof obj === 'string' ? { msg: obj } : { ...(obj as Record<string, unknown>), ...(msg ? { msg } : {}) };
+        process.stdout.write(
+          JSON.stringify({ ts: new Date().toISOString(), level: lvl, context: 'baileys-wire', ...rec }) + '\n',
+        );
+      };
   const logger: BaileysLogger = {
     level: configured,
     child: () => logger,
@@ -672,8 +672,7 @@ export class BaileysAdapter implements IWhatsAppEngine {
         // clean disconnect (the credentials did not actually get wiped).
         this.setStatus(EngineStatus.FAILED);
         this.callbacks.onError?.(
-          `Logged out by WhatsApp, but the local credential cleanup failed: ${
-            err instanceof Error ? err.message : String(err)
+          `Logged out by WhatsApp, but the local credential cleanup failed: ${err instanceof Error ? err.message : String(err)
           }`,
         );
         return;
@@ -811,6 +810,17 @@ export class BaileysAdapter implements IWhatsAppEngine {
       // endpoint or MCP tool (mirrors the whatsapp-web.js adapter; #583 R4). A migrated contact can
       // yield `No LID for user` on the presence path even when the actual send succeeds.
       this.logger.warn(`Could not set chat state '${state}' for ${chatId} (best-effort)`, { error: String(error) });
+    }
+  }
+
+  async sendPresenceAvailable(): Promise<void> {
+    this.ensureReady();
+    try {
+      // The global "online" flip (no chat target) — Baileys also marks online on connect by
+      // default (markOnlineOnConnect), this covers the moments BETWEEN sends.
+      await this.sock!.sendPresenceUpdate('available');
+    } catch (error) {
+      this.logger.warn('Could not mark presence available (best-effort)', { error: String(error) });
     }
   }
 
@@ -1987,15 +1997,15 @@ export class BaileysAdapter implements IWhatsAppEngine {
     const extText = normalizedForContext.extendedTextMessage;
     const contextInfo = (
       subForContext as
-        | {
-            contextInfo?: {
-              stanzaId?: string | null;
-              quotedMessage?: Record<string, unknown> | null;
-              expiration?: number | null;
-              mentionedJid?: string[] | null;
-            };
-          }
-        | undefined
+      | {
+        contextInfo?: {
+          stanzaId?: string | null;
+          quotedMessage?: Record<string, unknown> | null;
+          expiration?: number | null;
+          mentionedJid?: string[] | null;
+        };
+      }
+      | undefined
     )?.contextInfo;
     if (contextInfo?.quotedMessage && contextInfo.stanzaId) {
       const qm = contextInfo.quotedMessage as {

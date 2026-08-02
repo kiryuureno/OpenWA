@@ -124,6 +124,18 @@ class BulkMessageOptionsDto {
   @IsOptional()
   @IsBoolean()
   stopOnError?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'Humanized (stealth) pacing for the batch: per-session queue with presence/typing simulation ' +
+      'and jittered gaps (delayBetweenMessages becomes the gap FLOOR; randomizeDelay is superseded). ' +
+      'Default true; set false for the legacy fixed-delay loop.',
+    default: true,
+  })
+  @ToStrictBoolean()
+  @IsOptional()
+  @IsBoolean()
+  humanize?: boolean;
 }
 
 export class SendBulkMessageDto {

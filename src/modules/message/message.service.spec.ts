@@ -13,6 +13,7 @@ import { TemplateService } from '../template/template.service';
 import { Template } from '../template/entities/template.entity';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
+import { StealthQueueService } from '../stealth/stealth-queue.service';
 
 const mockEngineResult = { id: 'wa-msg-1', timestamp: 1706868000 };
 
@@ -47,17 +48,8 @@ describe('MessageService', () => {
   let hookManager: jest.Mocked<Partial<HookManager>>;
   let templateService: jest.Mocked<Partial<TemplateService>>;
   let lidMappingStore: { lidsForPhone: jest.Mock; getCached: jest.Mock };
+  let stealth: { executeSend: jest.Mock };
   let mockEngine: ReturnType<typeof createMockEngine>;
-
-  // Auto-typing is on by default; disable it for the unrelated send tests so they don't incur the
-  // real setTimeout delay and don't add an extra sendChatState call. The auto-typing suite opts in.
-  beforeEach(() => {
-    process.env.SIMULATE_TYPING = 'false';
-  });
-  afterEach(() => {
-    delete process.env.SIMULATE_TYPING;
-    delete process.env.SIMULATE_TYPING_MAX_MS;
-  });
 
   beforeEach(async () => {
     repository = {
@@ -94,6 +86,16 @@ describe('MessageService', () => {
 
     lidMappingStore = { lidsForPhone: jest.fn().mockReturnValue([]), getCached: jest.fn().mockReturnValue(undefined) };
 
+    // The stealth humanizer is mocked through as a DIRECT send (run(engine) immediately) so these
+    // tests keep their historical shape; the humanized pipeline itself is covered exhaustively in
+    // src/modules/stealth/stealth-queue.service.spec.ts. Tests that care about the delegation
+    // (kind / textLength / humanize passthrough) assert on this mock directly.
+    stealth = {
+      executeSend: jest.fn((sessionId: string, _req: unknown, run: (engine: unknown) => unknown) =>
+        Promise.resolve(run(engines.get(sessionId))),
+      ),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         MessageService,
@@ -104,29 +106,66 @@ describe('MessageService', () => {
         { provide: HookManager, useValue: hookManager },
         { provide: TemplateService, useValue: templateService },
         { provide: LidMappingStoreService, useValue: lidMappingStore },
+        { provide: StealthQueueService, useValue: stealth },
       ],
     }).compile();
 
     service = module.get<MessageService>(MessageService);
   });
 
-  // ── sendText ──────────────────────────────────────────────────────
+  // ── stealth delegation ────────────────────────────────────────────
 
-  describe('auto-typing before send (SIMULATE_TYPING, on by default)', () => {
-    it('sends a typing presence before the message by default', async () => {
-      delete process.env.SIMULATE_TYPING; // default = on
-      process.env.SIMULATE_TYPING_MAX_MS = '1'; // keep the humanising delay ~instant in tests
-
+  describe('stealth humanizer delegation (replaces the old SIMULATE_TYPING path)', () => {
+    it('routes a text send through the stealth queue with kind/textLength and humanize on by default', async () => {
       await service.sendText('sess-1', { chatId: '628123456789@c.us', text: 'Hello' });
 
-      expect(mockEngine.sendChatState).toHaveBeenCalledWith('628123456789@c.us', 'typing');
+      expect(stealth.executeSend).toHaveBeenCalledWith(
+        'sess-1',
+        expect.objectContaining({
+          chatId: '628123456789@c.us',
+          kind: 'text',
+          textLength: 5,
+          humanize: undefined, // DTO omitted it → the stealth default (on) applies
+        }),
+        expect.any(Function),
+      );
       expect(mockEngine.sendTextMessage).toHaveBeenCalledWith('628123456789@c.us', 'Hello');
     });
 
-    it('does not send typing presence when SIMULATE_TYPING=false', async () => {
-      process.env.SIMULATE_TYPING = 'false';
-      await service.sendText('sess-1', { chatId: '628123456789@c.us', text: 'Hello' });
-      expect(mockEngine.sendChatState).not.toHaveBeenCalled();
+    it('passes humanize:false through for a low-latency direct send', async () => {
+      await service.sendText('sess-1', { chatId: '628123456789@c.us', text: 'Hello', humanize: false });
+      expect(stealth.executeSend).toHaveBeenCalledWith(
+        'sess-1',
+        expect.objectContaining({ humanize: false }),
+        expect.any(Function),
+      );
+    });
+
+    it('routes a voice note as kind "voice" (recording indicator) and media as kind "media"', async () => {
+      await service.sendAudio('sess-1', { chatId: '628@c.us', url: 'https://e.com/v.ogg', ptt: true });
+      expect(stealth.executeSend).toHaveBeenCalledWith(
+        'sess-1',
+        expect.objectContaining({ kind: 'voice' }),
+        expect.any(Function),
+      );
+
+      await service.sendImage('sess-1', { chatId: '628@c.us', url: 'https://e.com/i.jpg', caption: 'hi' });
+      expect(stealth.executeSend).toHaveBeenCalledWith(
+        'sess-1',
+        expect.objectContaining({ kind: 'media', textLength: 2 }),
+        expect.any(Function),
+      );
+    });
+
+    it('a send failure inside the stealth pipeline still lands in failSend (FAILED + message:failed)', async () => {
+      stealth.executeSend.mockRejectedValueOnce(new Error('engine down'));
+
+      await expect(service.sendText('sess-1', { chatId: '628@c.us', text: 'hi' })).rejects.toThrow('engine down');
+      expect(hookManager.execute).toHaveBeenCalledWith(
+        'message:failed',
+        expect.objectContaining({ type: 'text', error: 'engine down' }),
+        expect.any(Object),
+      );
     });
   });
 
@@ -399,7 +438,7 @@ describe('MessageService', () => {
     it('honors a configured template.renderMaxChars override', async () => {
       const configService = {
         get: (key: string, fallback: unknown) => (key === 'template.renderMaxChars' ? 10 : fallback),
-      } as unknown as ConstructorParameters<typeof MessageService>[7];
+      } as unknown as ConstructorParameters<typeof MessageService>[8];
       const capped = new MessageService(
         repository as Repository<Message>,
         sessionService as unknown as SessionService,
@@ -408,6 +447,7 @@ describe('MessageService', () => {
         hookManager as HookManager,
         templateService as unknown as TemplateService,
         lidMappingStore as unknown as LidMappingStoreService,
+        stealth as unknown as StealthQueueService,
         configService,
       );
       (templateService.resolve as jest.Mock).mockResolvedValue(mockTemplate({ body: 'Hello {{customer}}' }));
@@ -663,8 +703,8 @@ describe('MessageService', () => {
           const matched =
             froms || authorFroms
               ? rows.filter(
-                  r => froms?.includes(r.from) || (r.author != null && (authorFroms?.includes(r.author) ?? false)),
-                )
+                r => froms?.includes(r.from) || (r.author != null && (authorFroms?.includes(r.author) ?? false)),
+              )
               : rows;
           return Promise.resolve([matched, matched.length]);
         }),

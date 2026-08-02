@@ -17,8 +17,9 @@ import { renderTemplate } from '../../common/utils/template-render';
 import { createLogger } from '../../common/services/logger.service';
 import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/security/ssrf-guard';
 import { parseWaId } from '../../engine/identity/wa-id';
-import { resolveFeatureFlags } from '../../config/feature-flags';
 import { LidMappingStoreService } from '../../engine/identity/lid-mapping-store.service';
+import { StealthQueueService } from '../stealth/stealth-queue.service';
+import { contentFingerprint } from '../stealth/content-fingerprint';
 import { isUniqueConstraintError } from '../../common/utils/unique-constraint.util';
 
 export interface GetMessagesOptions {
@@ -33,7 +34,8 @@ export interface GetMessagesOptions {
 export const DEFAULT_TEMPLATE_RENDER_MAX_CHARS = 64 * 1024;
 
 /**
- * Outbound sends are executed directly against the WhatsApp engine, not via a BullMQ queue.
+ * Outbound sends are executed against the WhatsApp engine through the STEALTH humanizer
+ * (StealthQueueService), not via a BullMQ queue.
  *
  * The engine is single-threaded per session (a Puppeteer page for the whatsapp-web.js adapter, a
  * single socket for Baileys) and is therefore itself the serialization point for that session's
@@ -60,14 +62,16 @@ export class MessageService {
     private readonly hookManager: HookManager,
     private readonly templateService: TemplateService,
     private readonly lidMappingStore: LidMappingStoreService,
+    private readonly stealth: StealthQueueService,
     @Optional()
     private readonly configService?: ConfigService,
-  ) {}
+  ) { }
 
   async sendText(sessionId: string, dto: SendTextMessageDto): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'text', dto);
 
-    const engine = this.getEngine(sessionId);
+    // Upfront session-active guard (documented 400) — the humanizer re-resolves the engine itself.
+    this.getEngine(sessionId);
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -76,15 +80,26 @@ export class MessageService {
       type: 'text',
     });
 
-    // Opt-in humanising "typing…" pause before the actual send (anti-automation signal).
-    await this.simulateTypingIfEnabled(engine, finalDto.chatId, finalDto.text);
-
     let result: MessageResult;
     try {
+      // Humanized (stealth) send: per-session serialized queue with online presence + a typing
+      // indicator held for a length-scaled duration before the real send (anti-ban). The engine is
+      // re-resolved at drain time, so a reconnect between this point and the send is tolerated.
       // Keep the 2-arg call shape for plain sends; only pass mentions when the caller supplied any.
-      result = finalDto.mentions?.length
-        ? await engine.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions)
-        : await engine.sendTextMessage(finalDto.chatId, finalDto.text);
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'text',
+          textLength: finalDto.text.length,
+          contentKey: contentFingerprint(finalDto.text),
+          humanize: finalDto.humanize,
+        },
+        eng =>
+          finalDto.mentions?.length
+            ? eng.sendTextMessage(finalDto.chatId, finalDto.text, finalDto.mentions)
+            : eng.sendTextMessage(finalDto.chatId, finalDto.text),
+      );
     } catch (error) {
       // The SEND itself failed — mark FAILED + fire message:failed (a post-send persistence fault is
       // handled separately by persistSentState and must NOT land here).
@@ -179,7 +194,7 @@ export class MessageService {
 
   async sendImage(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'image', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
     const media = this.buildMediaInput(finalDto);
 
     // Save message as pending BEFORE sending
@@ -194,7 +209,17 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendImageMessage(finalDto.chatId, media);
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: finalDto.caption?.length ?? 0,
+          contentKey: contentFingerprint(finalDto.mimetype, finalDto.url ?? finalDto.base64, finalDto.caption),
+          humanize: finalDto.humanize,
+        },
+        eng => eng.sendImageMessage(finalDto.chatId, media),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'image', message, finalDto, error);
     }
@@ -203,7 +228,7 @@ export class MessageService {
 
   async sendVideo(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'video', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
     const media = this.buildMediaInput(finalDto);
 
     // Save message as pending BEFORE sending
@@ -218,7 +243,17 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendVideoMessage(finalDto.chatId, media);
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: finalDto.caption?.length ?? 0,
+          contentKey: contentFingerprint(finalDto.mimetype, finalDto.url ?? finalDto.base64, finalDto.caption),
+          humanize: finalDto.humanize,
+        },
+        eng => eng.sendVideoMessage(finalDto.chatId, media),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'video', message, finalDto, error);
     }
@@ -230,7 +265,7 @@ export class MessageService {
     // persisted row all carry the same type for one outbound voice note — failSend and the saved row
     // already use `finalDto.ptt ? 'voice' : 'audio'`.
     const finalDto = await this.applySendingGate(sessionId, dto.ptt ? 'voice' : 'audio', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
     // Voice notes need a real audio codec; default to ogg/opus when the caller omits a mimetype so the
     // wire message and the persisted record agree. Resolved BEFORE buildMediaInput so its base64
     // mimetype guard sees the effective type. buildMediaInput itself stays generic (shared by all media).
@@ -251,7 +286,18 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendAudioMessage(finalDto.chatId, media);
+      // A PTT send shows the "recording" indicator (kind 'voice'); a plain audio file shows typing.
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: finalDto.ptt ? 'voice' : 'media',
+          textLength: finalDto.caption?.length ?? 0,
+          contentKey: contentFingerprint(finalDto.mimetype, finalDto.url ?? finalDto.base64, finalDto.caption),
+          humanize: finalDto.humanize,
+        },
+        eng => eng.sendAudioMessage(finalDto.chatId, media),
+      );
     } catch (error) {
       return this.failSend(sessionId, finalDto.ptt ? 'voice' : 'audio', message, finalDto, error);
     }
@@ -260,7 +306,7 @@ export class MessageService {
 
   async sendDocument(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'document', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
     const media = this.buildMediaInput(finalDto);
 
     // Save message as pending BEFORE sending
@@ -275,7 +321,17 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendDocumentMessage(finalDto.chatId, media);
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: finalDto.caption?.length ?? 0,
+          contentKey: contentFingerprint(finalDto.mimetype, finalDto.url ?? finalDto.base64, finalDto.caption),
+          humanize: finalDto.humanize,
+        },
+        eng => eng.sendDocumentMessage(finalDto.chatId, media),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'document', message, finalDto, error);
     }
@@ -374,7 +430,7 @@ export class MessageService {
     dto: { chatId: string; latitude: number; longitude: number; description?: string; address?: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'location', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -385,12 +441,22 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendLocationMessage(finalDto.chatId, {
-        latitude: finalDto.latitude,
-        longitude: finalDto.longitude,
-        description: finalDto.description,
-        address: finalDto.address,
-      });
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: 0,
+          contentKey: contentFingerprint('location', String(finalDto.latitude), String(finalDto.longitude)),
+        },
+        eng =>
+          eng.sendLocationMessage(finalDto.chatId, {
+            latitude: finalDto.latitude,
+            longitude: finalDto.longitude,
+            description: finalDto.description,
+            address: finalDto.address,
+          }),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'location', message, finalDto, error);
     }
@@ -402,7 +468,7 @@ export class MessageService {
     dto: { chatId: string; contactName: string; contactNumber: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'contact', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -413,10 +479,20 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendContactMessage(finalDto.chatId, {
-        name: finalDto.contactName,
-        number: finalDto.contactNumber,
-      });
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: 0,
+          contentKey: contentFingerprint('contact', finalDto.contactName, finalDto.contactNumber),
+        },
+        eng =>
+          eng.sendContactMessage(finalDto.chatId, {
+            name: finalDto.contactName,
+            number: finalDto.contactNumber,
+          }),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'contact', message, finalDto, error);
     }
@@ -428,7 +504,7 @@ export class MessageService {
     dto: { chatId: string; name: string; options: string[]; allowMultipleAnswers?: boolean },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'poll', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
 
     // Save message as pending BEFORE sending. A poll has no plain-text body, so store the
     // question — that keeps the message history readable.
@@ -440,11 +516,21 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendPollMessage(finalDto.chatId, {
-        name: finalDto.name,
-        options: finalDto.options,
-        allowMultipleAnswers: finalDto.allowMultipleAnswers === true,
-      });
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'text',
+          textLength: finalDto.name.length,
+          contentKey: contentFingerprint('poll', finalDto.name, finalDto.options.join('')),
+        },
+        eng =>
+          eng.sendPollMessage(finalDto.chatId, {
+            name: finalDto.name,
+            options: finalDto.options,
+            allowMultipleAnswers: finalDto.allowMultipleAnswers === true,
+          }),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'poll', message, finalDto, error);
     }
@@ -453,7 +539,7 @@ export class MessageService {
 
   async sendSticker(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'sticker', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
     const media = this.buildMediaInput(finalDto);
 
     // Save message as pending BEFORE sending
@@ -467,7 +553,17 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.sendStickerMessage(finalDto.chatId, media);
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'media',
+          textLength: 0,
+          contentKey: contentFingerprint('sticker', finalDto.url ?? finalDto.base64),
+          humanize: finalDto.humanize,
+        },
+        eng => eng.sendStickerMessage(finalDto.chatId, media),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'sticker', message, finalDto, error);
     }
@@ -479,7 +575,7 @@ export class MessageService {
     dto: { chatId: string; quotedMessageId: string; text: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'reply', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
 
     // Resolve the quoted message body (best-effort) so the dashboard can render the reply preview.
     let quotedBody = '';
@@ -504,7 +600,17 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.replyToMessage(finalDto.chatId, finalDto.quotedMessageId, finalDto.text);
+      // A reply is the most human kind of send — typing simulation matters most here.
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.chatId,
+          kind: 'text',
+          textLength: finalDto.text.length,
+          contentKey: contentFingerprint(finalDto.text),
+        },
+        eng => eng.replyToMessage(finalDto.chatId, finalDto.quotedMessageId, finalDto.text),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'reply', message, finalDto, error);
     }
@@ -516,7 +622,7 @@ export class MessageService {
     dto: { fromChatId: string; toChatId: string; messageId: string },
   ): Promise<MessageResponseDto> {
     const finalDto = await this.applySendingGate(sessionId, 'forward', dto);
-    const engine = this.getEngine(sessionId);
+    this.getEngine(sessionId);
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -527,7 +633,18 @@ export class MessageService {
 
     let result: MessageResult;
     try {
-      result = await engine.forwardMessage(finalDto.fromChatId, finalDto.toChatId, finalDto.messageId);
+      // Forwarding the SAME message to many destinations is a classic spam pattern — the content
+      // fingerprint keys on the source message so the guard throttles exactly that behavior.
+      result = await this.stealth.executeSend(
+        sessionId,
+        {
+          chatId: finalDto.toChatId,
+          kind: 'media',
+          textLength: 0,
+          contentKey: contentFingerprint('forward', finalDto.fromChatId, finalDto.messageId),
+        },
+        eng => eng.forwardMessage(finalDto.fromChatId, finalDto.toChatId, finalDto.messageId),
+      );
     } catch (error) {
       return this.failSend(sessionId, 'forward', message, finalDto, error);
     }
@@ -773,28 +890,6 @@ export class MessageService {
       sessionId,
       () => new BadRequestException(`Session '${sessionId}' is not active. Start the session first.`),
     );
-  }
-
-  /**
-   * Humanising delay: show the engine's typing indicator and pause for a length-scaled, jittered
-   * interval before the real send, so automated single sends don't look instantaneous (anti-ban).
-   * ON by default — set `SIMULATE_TYPING=false` to disable. Engine-agnostic (goes through
-   * `sendChatState`) and strictly best-effort — it never throws and never blocks the send if presence
-   * fails or the engine has no presence concept. `SIMULATE_TYPING_MAX_MS` (default 5000) caps the pause.
-   * Note: this covers single sends only; bulk sends use their own `delayBetweenMessages` throttle.
-   */
-  private async simulateTypingIfEnabled(engine: IWhatsAppEngine, chatId: string, text: string): Promise<void> {
-    const { simulateTyping, simulateTypingMaxMs } = resolveFeatureFlags(this.configService);
-    if (!simulateTyping) return;
-    try {
-      await engine.sendChatState(chatId, 'typing');
-      const maxMs = simulateTypingMaxMs;
-      const planned = Math.min(maxMs, 500 + text.length * 45);
-      const jittered = Math.round(planned * (0.85 + Math.random() * 0.3)); // ±15% so it isn't metronomic
-      await new Promise(resolve => setTimeout(resolve, jittered));
-    } catch (error) {
-      this.logger.warn(`simulateTyping skipped: ${error instanceof Error ? error.message : String(error)}`);
-    }
   }
 
   /**

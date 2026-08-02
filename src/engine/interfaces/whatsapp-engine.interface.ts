@@ -771,4 +771,13 @@ export interface IWhatsAppEngine {
    * Engine-agnostic and best-effort: engines without a presence concept should no-op.
    */
   sendChatState(chatId: string, state: ChatState): Promise<void>;
+
+  /**
+   * Mark the account itself as "online" (presence available), not targeted at any chat — the
+   * global presence flip a phone makes when the user opens WhatsApp. Used by the stealth
+   * humanizer so automated traffic rides on a plausible online footprint. Optional and strictly
+   * best-effort: engines without a global presence concept omit it, and implementations must
+   * swallow failures (presence must never break a surrounding send).
+   */
+  sendPresenceAvailable?(): Promise<void>;
 }

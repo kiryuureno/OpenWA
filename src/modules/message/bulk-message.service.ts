@@ -19,6 +19,8 @@ import { SsrfBlockedError, SSRF_BLOCKED_CLIENT_MESSAGE } from '../../common/secu
 import { renderTemplate } from '../../common/utils/template-render';
 import { IWhatsAppEngine, MessageResult } from '../../engine/interfaces/whatsapp-engine.interface';
 import { resolveNonNegativeIntEnv } from '../../config/configuration';
+import { StealthQueueService } from '../stealth/stealth-queue.service';
+import { contentFingerprint } from '../stealth/content-fingerprint';
 
 // Type definitions for bulk message content
 interface BulkMessageContent {
@@ -82,7 +84,8 @@ export class BulkMessageService implements OnApplicationBootstrap {
     private readonly engines: EngineRegistry,
     private readonly messageService: MessageService,
     private readonly hookManager: HookManager,
-  ) {}
+    private readonly stealth: StealthQueueService,
+  ) { }
 
   /**
    * Transition orphaned batches on startup. A batch still in PROCESSING belongs to a
@@ -153,6 +156,7 @@ export class BulkMessageService implements OnApplicationBootstrap {
       delayBetweenMessages: dto.options?.delayBetweenMessages ?? 3000,
       randomizeDelay: dto.options?.randomizeDelay ?? true,
       stopOnError: dto.options?.stopOnError ?? false,
+      humanize: dto.options?.humanize ?? true,
     };
 
     const progress: BatchProgress = {
@@ -185,9 +189,9 @@ export class BulkMessageService implements OnApplicationBootstrap {
     }
     this.logger.log(
       `Created batch ${batchId} with ${messages.length} messages` +
-        (messages.length === dto.messages.length
-          ? ''
-          : ` (${dto.messages.length - messages.length} exact duplicate entr${dto.messages.length - messages.length === 1 ? 'y' : 'ies'} dropped)`),
+      (messages.length === dto.messages.length
+        ? ''
+        : ` (${dto.messages.length - messages.length} exact duplicate entr${dto.messages.length - messages.length === 1 ? 'y' : 'ies'} dropped)`),
     );
 
     // Start processing asynchronously
@@ -357,8 +361,30 @@ export class BulkMessageService implements OnApplicationBootstrap {
         // A violation fails just this item (honouring stopOnError) instead of sending it.
         this.assertContentMediaWithinCap(content);
 
-        // Send message based on type
-        const messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);
+        // Send message based on type. When humanize is on (default) the STEALTH queue owns the
+        // pacing: per-session serialization, presence/typing simulation, and a jittered gap whose
+        // floor is the batch's delayBetweenMessages (the in-loop sleep below is then skipped). With
+        // humanize:false the legacy direct send + fixed delay behavior is preserved verbatim.
+        const humanize = batch.options.humanize !== false;
+        const messageResult = await this.stealth.executeSend(
+          batch.sessionId,
+          {
+            chatId: msg.chatId,
+            kind: msg.type === 'text' ? 'text' : msg.type === 'audio' && content.audio?.ptt ? 'voice' : 'media',
+            textLength: (content.text ?? content.caption ?? '').length,
+            contentKey: contentFingerprint(
+              msg.type,
+              content.text,
+              content.caption,
+              content.image?.url ?? content.image?.base64 ?? content.video?.url ?? content.video?.base64,
+              content.audio?.url ?? content.audio?.base64 ?? content.document?.url ?? content.document?.base64,
+            ),
+            humanize,
+            background: true,
+            minGapMs: batch.options.delayBetweenMessages,
+          },
+          eng => this.sendMessage(eng, msg.chatId, msg.type, content),
+        );
 
         result.status = BatchMessageStatus.SENT;
         result.messageId = messageResult.id;
@@ -422,8 +448,10 @@ export class BulkMessageService implements OnApplicationBootstrap {
         }
       }
 
-      // Delay before next message (except for last)
-      if (i < batch.messages.length - 1 && this.processingBatches.get(batch.id)) {
+      // Delay before next message (except for last). Skipped when the stealth humanizer owns the
+      // pacing (humanize on): its per-session queue already applies the inter-message gap with the
+      // batch's delayBetweenMessages as the floor — sleeping here too would double the wait.
+      if (i < batch.messages.length - 1 && this.processingBatches.get(batch.id) && batch.options.humanize === false) {
         const delay = this.calculateDelay(batch.options);
         await this.sleep(delay);
       }
@@ -561,12 +589,12 @@ export class BulkMessageService implements OnApplicationBootstrap {
         status: MessageStatus.SENT,
         metadata: media
           ? {
-              media: {
-                mimetype: media.mimetype,
-                data: stripBase64DataUri(media.base64) || media.url,
-                filename: media.filename,
-              },
-            }
+            media: {
+              mimetype: media.mimetype,
+              data: stripBase64DataUri(media.base64) || media.url,
+              filename: media.filename,
+            },
+          }
           : undefined,
       });
     } catch (error) {

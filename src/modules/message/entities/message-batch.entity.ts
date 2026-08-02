@@ -66,6 +66,8 @@ export class MessageBatch {
     delayBetweenMessages: number;
     randomizeDelay: boolean;
     stopOnError: boolean;
+    /** Stealth humanized pacing for the batch (default true when absent on older rows). */
+    humanize?: boolean;
   };
 
   @Column({ type: jsonColumnType(), nullable: true })
