@@ -16,6 +16,7 @@ import type { IWhatsAppEngine } from '../../engine/interfaces/whatsapp-engine.in
 import { MessageService } from './message.service';
 import { HookManager } from '../../core/hooks';
 import { SsrfBlockedError } from '../../common/security/ssrf-guard';
+import { StealthQueueService } from '../stealth/stealth-queue.service';
 
 /** Regression lock for the terminal-status decision (cancel-clobber + stopOnError overwrite bugs). */
 describe('resolveFinalBatchStatus', () => {
@@ -78,6 +79,7 @@ describe('BulkMessageService.onApplicationBootstrap', () => {
               .mockImplementation((_e: string, d: unknown) => Promise.resolve({ continue: true, data: d })),
           },
         },
+        { provide: StealthQueueService, useValue: {} },
       ],
     }).compile();
     service = module.get<BulkMessageService>(BulkMessageService);
@@ -168,6 +170,15 @@ describe('BulkMessageService.processBatch', () => {
         { provide: EngineRegistry, useValue: engines },
         { provide: MessageService, useValue: messageService },
         { provide: HookManager, useValue: hookManager },
+        {
+          provide: StealthQueueService,
+          useValue: {
+            executeSend: jest.fn().mockImplementation((sessionId, req, run) => {
+              const eng = engines.get(sessionId);
+              return run(eng);
+            }),
+          },
+        },
       ],
     }).compile();
     service = module.get<BulkMessageService>(BulkMessageService);
@@ -580,6 +591,7 @@ describe('BulkMessageService.cancelBatch', () => {
         EngineRegistry,
         { provide: MessageService, useValue: {} },
         { provide: HookManager, useValue: { execute: jest.fn() } },
+        { provide: StealthQueueService, useValue: {} },
       ],
     }).compile();
     service = module.get(BulkMessageService);
@@ -660,6 +672,15 @@ describe('BulkMessageService.createBatch base64 media cap', () => {
             execute: jest
               .fn()
               .mockImplementation((_e: string, d: unknown) => Promise.resolve({ continue: true, data: d })),
+          },
+        },
+        {
+          provide: StealthQueueService,
+          useValue: {
+            executeSend: jest.fn().mockImplementation((sessionId, req, run) => {
+              const eng = engines.get(sessionId);
+              return run(eng);
+            }),
           },
         },
       ],

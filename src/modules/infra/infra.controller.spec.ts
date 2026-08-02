@@ -111,7 +111,7 @@ describe('InfraController.importStorage filePath validation (Vuln 3)', () => {
 
   it('guards and opens the same cwd-resolved path returned by storage export', async () => {
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue('/srv/openwa');
-    (fs.existsSync as jest.Mock).mockImplementation((p: string) => p === '/srv/openwa/data/exports/export.tar.gz');
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => path.resolve(p) === path.resolve('/srv/openwa/data/exports/export.tar.gz'));
     (fs.createReadStream as jest.Mock).mockClear();
     const storage = {
       importFromStream: jest.fn().mockResolvedValue(3),
@@ -119,7 +119,7 @@ describe('InfraController.importStorage filePath validation (Vuln 3)', () => {
     };
     try {
       const result = await buildController(storage).importStorage({ filePath: 'data/exports/export.tar.gz' });
-      expect(fs.createReadStream).toHaveBeenCalledWith('/srv/openwa/data/exports/export.tar.gz');
+      expect(fs.createReadStream).toHaveBeenCalledWith(path.resolve('/srv/openwa/data/exports/export.tar.gz'));
       expect(storage.importFromStream).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ imported: true, count: 3, storageType: 'local' });
     } finally {
@@ -2228,7 +2228,7 @@ describe('InfraController C002 audit trail (light-dependency handlers)', () => {
   it('importStorage emits INFRA_STORAGE_IMPORTED with the imported file count', async () => {
     const audit = makeAudit();
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue('/srv/openwa');
-    (fs.existsSync as jest.Mock).mockImplementation((p: string) => p === '/srv/openwa/data/exports/x.tar.gz');
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => path.resolve(p) === path.resolve('/srv/openwa/data/exports/x.tar.gz'));
     try {
       const storageService = { importFromStream: jest.fn().mockResolvedValue(5), getCurrentStorageType: () => 'local' };
       await build(audit, { storageService }).importStorage({ filePath: 'data/exports/x.tar.gz' });
@@ -2728,7 +2728,7 @@ describe('InfraController.importData status_updates + runtime reconciliation', (
 describe('InfraController storage stream failures surface as request errors, not process crashes', () => {
   it('importStorage maps an archive/stream failure to a 400 with the real reason', async () => {
     const cwdSpy = jest.spyOn(process, 'cwd').mockReturnValue('/srv/openwa');
-    (fs.existsSync as jest.Mock).mockImplementation((p: string) => p === '/srv/openwa/data/exports/bad.tar.gz');
+    (fs.existsSync as jest.Mock).mockImplementation((p: string) => path.resolve(p) === path.resolve('/srv/openwa/data/exports/bad.tar.gz'));
     try {
       const storage = {
         importFromStream: jest.fn().mockRejectedValue(new Error('incorrect header check')),

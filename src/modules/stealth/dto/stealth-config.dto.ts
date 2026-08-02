@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsInt, IsOptional, IsString, Matches, Max, Min } from 'class-validator';
-import { ToStrictBoolean } from '../../../common/utils/strict-boolean';
+import { ToStrictBoolean, ToStrictNumber } from '../../../common/utils/strict-boolean';
 
 /**
  * Per-session stealth overrides (PATCH /api/sessions/:id/stealth). All fields optional — only the
@@ -34,6 +34,7 @@ export class UpdateStealthConfigDto {
     presenceEnabled?: boolean;
 
     @ApiPropertyOptional({ description: 'Soft daily outbound cap (0 = unlimited). Crossing it only raises the throttle' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -41,6 +42,7 @@ export class UpdateStealthConfigDto {
     dailyCap?: number;
 
     @ApiPropertyOptional({ description: 'Soft daily cap on first-contact chats (0 = unlimited)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -48,6 +50,7 @@ export class UpdateStealthConfigDto {
     newChatDailyCap?: number;
 
     @ApiPropertyOptional({ description: 'Warm-up ramp days for young sessions (0 = disabled)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -61,6 +64,7 @@ export class UpdateStealthConfigDto {
     quietHours?: string;
 
     @ApiPropertyOptional({ description: 'Normal inter-message gap floor (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -68,6 +72,7 @@ export class UpdateStealthConfigDto {
     delayMinMs?: number;
 
     @ApiPropertyOptional({ description: 'Normal inter-message gap ceiling (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -75,6 +80,7 @@ export class UpdateStealthConfigDto {
     delayMaxMs?: number;
 
     @ApiPropertyOptional({ description: 'First-contact gap floor (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -82,6 +88,7 @@ export class UpdateStealthConfigDto {
     newChatDelayMinMs?: number;
 
     @ApiPropertyOptional({ description: 'First-contact gap ceiling (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -89,6 +96,7 @@ export class UpdateStealthConfigDto {
     newChatDelayMaxMs?: number;
 
     @ApiPropertyOptional({ description: 'Typing-simulation floor (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
@@ -96,6 +104,7 @@ export class UpdateStealthConfigDto {
     typingMinMs?: number;
 
     @ApiPropertyOptional({ description: 'Typing-simulation cap (ms)' })
+    @ToStrictNumber()
     @IsOptional()
     @IsInt()
     @Min(0)
