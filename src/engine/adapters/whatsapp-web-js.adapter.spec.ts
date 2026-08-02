@@ -4838,9 +4838,9 @@ describe('WhatsAppWebJsAdapter honest outcomes (no phantom success)', () => {
       await expect(adapter.joinGroupViaInviteCode('BAD')).rejects.toBeInstanceOf(InvalidInviteCodeError);
     });
 
-    it('getProfilePicture answers EngineTransportError (503) on a dead page — not null (→ false "no picture")', async () => {
+    it('getProfilePicture answers null safely on transport error to prevent session teardown', async () => {
       const adapter = readyAdapter({ getProfilePicUrl: jest.fn().mockRejectedValue(transportError()) });
-      await expect(adapter.getProfilePicture('12345@c.us')).rejects.toBeInstanceOf(EngineTransportError);
+      await expect(adapter.getProfilePicture('12345@c.us')).resolves.toBeNull();
     });
 
     it('getProfilePicture still maps a genuine lookup failure to null (→ "no picture")', async () => {
