@@ -329,7 +329,7 @@ function resolveOnboardingContinueLabels(): string[] {
     .split(',')
     .map(label => label.trim())
     .filter(Boolean);
-  return [ONBOARDING_DEFAULT_CONTINUE_LABEL, ...extra];
+  return [ONBOARDING_DEFAULT_CONTINUE_LABEL, 'Continuar', 'Avançar', 'Fechar', 'Entendi', 'OK', ...extra];
 }
 
 /**
@@ -615,6 +615,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // output later (after a hard kill of the OpenWA process orphaned them).
       puppeteerArgs.push(`--openwa-session=${this.config.sessionId}`);
 
+      // Bypass bot detection by hiding Puppeteer's navigator.webdriver property
+      if (!puppeteerArgs.includes('--disable-blink-features=AutomationControlled')) {
+        puppeteerArgs.push('--disable-blink-features=AutomationControlled');
+      }
+
       // Pin the WA-Web version (fixes the 1.34.x "stuck at authenticating" hang on some setups,
       // #251/#488). DEFAULT: auto-resolve a settled build from the wa-version registry and pin its
       // remote HTML (no integrity check — resolveWebVersionPin logs a loud warning); only
@@ -634,6 +639,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       if (authTimeoutMs) {
         this.logger.log(`Using auth timeout ${authTimeoutMs}ms`);
       }
+
+      // Modern desktop Chrome user agent to look like a real browser and match Chromium's version better
+      const customUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
       this.client = new Client({
         authStrategy: new LocalAuth({
@@ -655,6 +663,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           // whatsapp-web.js fall back to Puppeteer's bundled Chromium.
           ...(this.config.puppeteer?.executablePath ? { executablePath: this.config.puppeteer.executablePath } : {}),
         },
+        userAgent: customUserAgent,
+        takeoverOnConflict: true,
+        takeoverTimeoutMs: 5000,
         ...(authTimeoutMs !== undefined ? { authTimeoutMs } : {}),
         ...(proxyAuthentication ? { proxyAuthentication } : {}),
         ...(versionPin ?? {}),
