@@ -620,6 +620,17 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         puppeteerArgs.push('--disable-blink-features=AutomationControlled');
       }
 
+      // Memory & Docker stability flags: prevent Chromium tab crashes in containerized environments
+      if (!puppeteerArgs.includes('--disable-dev-shm-usage')) {
+        puppeteerArgs.push('--disable-dev-shm-usage');
+      }
+      if (!puppeteerArgs.includes('--disable-gpu')) {
+        puppeteerArgs.push('--disable-gpu');
+      }
+      if (!puppeteerArgs.includes('--no-zygote')) {
+        puppeteerArgs.push('--no-zygote');
+      }
+
       // Pin the WA-Web version (fixes the 1.34.x "stuck at authenticating" hang on some setups,
       // #251/#488). DEFAULT: auto-resolve a settled build from the wa-version registry and pin its
       // remote HTML (no integrity check — resolveWebVersionPin logs a loud warning); only
