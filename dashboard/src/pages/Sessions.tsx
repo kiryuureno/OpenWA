@@ -224,15 +224,17 @@ export function Sessions() {
         currentSessionName.current = '';
         return;
       }
-      // Poll only while a QR actually exists to refresh (qr_ready): before that the endpoint 400s
-      // by design (the engine hasn't produced one), and the WS session.qr push covers first display.
-      if (currentSession?.status !== 'qr_ready') return;
+      // Poll while the session is initializing or QR is ready.
+      if (currentSession && !['initializing', 'qr_ready'].includes(currentSession.status)) return;
       try {
         const qr = await sessionApi.getQR(sessionId);
         setQrData({ sessionId, sessionName: currentSessionName.current, qrCode: qr.qrCode });
         if (qr.status === 'ready') {
           setQrData(null);
           currentSessionName.current = '';
+          fetchSessions();
+        } else if (currentSession && currentSession.status !== qr.status) {
+          // If status synchronized/changed on backend, fetch all sessions to update the list status.
           fetchSessions();
         }
       } catch {
@@ -386,10 +388,8 @@ export function Sessions() {
     // even before Chromium has finished initializing.
     setQrData({ sessionId: id, sessionName, qrCode: '' });
     currentSessionName.current = sessionName;
-    // Eager-fetch only when a QR already exists (qr_ready): before that the endpoint 400s BY DESIGN
-    // (the engine hasn't produced one), and the WS session.qr push + gated 5s poll deliver it
-    // without spamming the console with expected failures.
-    if (session?.status === 'qr_ready') {
+    // Eager-fetch only when session is initializing or QR is ready (the backend might have it ready).
+    if (session && ['initializing', 'qr_ready'].includes(session.status)) {
       try {
         const qr = await sessionApi.getQR(id);
         setQrData({ sessionId: id, sessionName, qrCode: qr.qrCode });
