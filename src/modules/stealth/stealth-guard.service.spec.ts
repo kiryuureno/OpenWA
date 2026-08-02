@@ -99,7 +99,7 @@ describe('StealthGuardService', () => {
         });
 
         it('a young session gets a smaller warm-up budget than an established one', () => {
-            const { guard: young } = buildService({ sessionCreatedAt: new Date(Date.now() - 1 * 86_400_000) });
+            const { guard: young } = buildService({ sessionCreatedAt: new Date(Date.now() - 12 * 3600 * 1000) });
             const { guard: old } = buildService({ sessionCreatedAt: new Date(Date.now() - 60 * 86_400_000) });
             // Access the public surface via stats: budget differs by session age.
             return Promise.all([young.getStats('y', config), old.getStats('o', config)]).then(([youngStats, oldStats]) => {
