@@ -697,7 +697,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       // removeStaleSingletonFiles. This runs only at engine (re)start, never while
       // the browser is alive, so it cannot pull the files out from under a running Chromium.
       await removeStaleSingletonFiles(this.config.sessionId, this.config.sessionDataPath, this.logger);
-      await this.client.initialize();
+
+      // client.initialize() launches Chromium, fetches the pinned WA-Web HTML (if any), navigates
+      // to web.whatsapp.com, and waits for the WA-Web JS to bootstrap + emit a QR. It has NO
+      // internal timeout (page.goto uses { timeout: 0 }), so on a slow/containerized first boot it
+      // can hang silently for the full outer deadline (resolveEngineInitTimeoutMs, 60s default)
+      // before the SessionService's Promise.race fires. Log periodically so the operator can see
+      // WHICH phase is stuck (launch? remote-HTML fetch? WA-Web bootstrap?) instead of 60s of
+      // silence followed by "Engine initialization timed out".
+      const initStartedAt = Date.now();
+      const initProgressTimer = setInterval(() => {
+        const elapsed = Math.round((Date.now() - initStartedAt) / 1000);
+        this.logger.log(
+          `Engine initialize() still in progress (${elapsed}s) — waiting for Chromium launch / WA-Web bootstrap / QR`,
+          { sessionId: this.config.sessionId, elapsedSeconds: elapsed },
+        );
+      }, 15_000);
+      initProgressTimer.unref?.();
+
+      try {
+        await this.client.initialize();
+      } finally {
+        clearInterval(initProgressTimer);
+      }
       // whatsapp-web.js 1.34.x never observes the Chromium process/page it drives, so a crashed
       // browser leaves the client looking READY forever ("silent death"). Attach death listeners
       // to the puppeteer handles so a dead browser surfaces as a normal disconnect → reconnect.

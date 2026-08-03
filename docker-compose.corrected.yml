@@ -1,0 +1,71 @@
+version: "3.7"
+
+services:
+  openwa_api:
+    image: ghcr.io/kiryuureno/openwa:main
+    restart: unless-stopped
+    stop_grace_period: 45s
+    shm_size: '1g'
+    
+    # Conexão com o seu barramento de rede interna
+    networks:
+      - PetSoftNet
+    
+    volumes:
+      # Armazenamento persistente de sessões, banco SQLite e plugins
+      - openwa_data:/app/data
+
+    environment:
+      - PORT=2785
+      - NODE_ENV=production
+      - TZ=America/Sao_Paulo
+      - LOG_LEVEL=info
+
+      # Chave mestra de API para proteger sua instância de acessos não autorizados
+      - API_MASTER_KEY=sua_chave_mestra_secreta_aqui # ⚠️ Troque por uma string forte
+
+      # ── Correção para timeout na inicialização do engine ──────────────────────
+      # Aumenta o timeout de auth do whatsapp-web.js de 30s (default) para 120s.
+      # O timeout externo do engine passa a ser 150s (120s + 30s de margem).
+      # Em containers Docker com recursos limitados, 30s não é suficiente para o
+      # Chromium iniciar, baixar o HTML remoto do WA-Web, e gerar o QR code.
+      - WWEBJS_AUTH_TIMEOUT_MS=120000
+
+      # Desativa o pinning automático de versão do WhatsApp Web via registry remoto
+      # (wppconnect-team/wa-version). Usa o build first-party servido pelo próprio
+      # WhatsApp (comportamento nativo do whatsapp-web.js). Isso elimina a dependência
+      # de fetch remoto do HTML durante a inicialização, reduzindo pontos de falha.
+      # Se preferir pinar uma versão específica conhecida, comente a linha abaixo e
+      # descomente a linha com a versão desejada:
+      - WWEBJS_WEB_VERSION=off
+      # - WWEBJS_WEB_VERSION=2.3000.1040641150-alpha
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4096M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.openwa.rule=Host(`openwa.sopet.app`) # 🌐 Ajuste seu domínio aqui
+        - traefik.http.routers.openwa.entrypoints=websecure
+        - traefik.http.routers.openwa.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.openwa.priority=1
+        - traefik.http.routers.openwa.service=openwa
+        - traefik.http.services.openwa.loadbalancer.server.port=2785
+        - traefik.http.services.openwa.loadbalancer.passHostHeader=true
+
+volumes:
+  openwa_data:
+    external: true
+    name: openwa_data
+
+networks:
+  PetSoftNet:
+    external: true
+    name: PetSoftNet
